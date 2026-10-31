@@ -11,8 +11,6 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - run: xcodebuild -version
       - name: Build for simulator
         run: |
