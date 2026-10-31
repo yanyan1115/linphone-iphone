@@ -514,6 +514,7 @@ class CoreContext: ObservableObject {
 			self.mCore.autoIterateEnabled = true
 			
 			try? self.mCore.start()
+			TelecomManager.shared.ciProbeIfRequested()
 		}
 	}
 	

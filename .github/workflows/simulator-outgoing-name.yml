@@ -1,0 +1,44 @@
+name: simulator-outgoing-name
+on:
+  push:
+    branches: ['ci/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: xcodebuild -version
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          xcodebuild build -project LinphoneApp.xcodeproj -scheme Linphone \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee xcodebuild.log | grep -E 'error:|BUILD (SUCCEEDED|FAILED)|Resolved source packages' || true
+          test -d build/Build/Products/Debug-iphonesimulator/*.app
+      - name: Run probe
+        run: |
+          APP=$(ls -d build/Build/Products/Debug-iphonesimulator/*.app | head -1)
+          BID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in sorted(d.items(),reverse=True) if 'iOS' in k for x in v if 'iPhone' in x['name']))")
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+          SIMCTL_CHILD_CI_PROBE=1 xcrun simctl launch --console-pty --terminate-running-process "$UDID" "$BID" > app.log 2>&1 &
+          for t in 15 30 45 60; do sleep 15; xcrun simctl io "$UDID" screenshot "shot-$t.png" || true; done
+          grep -a 'CI_PROBE' app.log || echo 'no CI_PROBE lines'
+          tail -n 30 app.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe
+          path: |
+            xcodebuild.log
+            app.log
+            shot-*.png

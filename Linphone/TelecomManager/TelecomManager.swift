@@ -139,6 +139,37 @@ class TelecomManager: ObservableObject {
 		return String(addr.asStringUriOnly().dropFirst(4))
 	}
 	
+	func ciProbeIfRequested() {
+		guard ProcessInfo.processInfo.environment["CI_PROBE"] == "1" else { return }
+		DispatchQueue.main.asyncAfter(deadline: .now() + 20) {
+			CoreContext.shared.doOnCoreQueue { core in
+				do {
+					let plain = try Factory.Instance.createAddress(addr: "sip:someone@sip.linphone.org")
+					NSLog("CI_PROBE username-fallback name=%@", self.outgoingDisplayName(addr: plain))
+					let named = try Factory.Instance.createAddress(addr: "\"Display Name\" <sip:other@sip.linphone.org>")
+					NSLog("CI_PROBE displayname name=%@", self.outgoingDisplayName(addr: named))
+					let uri = "sip:claudeke@sip.linphone.org"
+					let contact = try Factory.Instance.createAddress(addr: uri)
+					var list = ContactsManager.shared.linphoneFriendList
+					if list == nil {
+						list = try core.createFriendList()
+						list?.displayName = "CI"
+						core.addFriendList(list: list!)
+						ContactsManager.shared.linphoneFriendList = list
+					}
+					let friend = try core.createFriend()
+					try friend.setName(newValue: "Claude")
+					friend.addAddress(address: contact)
+					_ = list?.addFriend(linphoneFriend: friend)
+					NSLog("CI_PROBE friend name=%@", self.outgoingDisplayName(addr: contact))
+					self.startCall(core: core, addr: uri, isVideo: false)
+				} catch {
+					NSLog("CI_PROBE failed: %@", String(describing: error))
+				}
+			}
+		}
+	}
+	
 	func setHeldOtherCalls(core: Core, exceptCallid: String) {
 		for call in core.calls {
 			if call.callLog?.callId != exceptCallid && call.state != .Paused && call.state != .Pausing && call.state != .PausedByRemote {
@@ -429,12 +460,13 @@ class TelecomManager: ObservableObject {
 #if !targetEnvironment(simulator)
 		return core.callkitEnabled
 #else
-		return false
+		return ProcessInfo.processInfo.environment["CI_PROBE"] == "1"
 #endif
 	}
 	
 	func requestTransaction(_ transaction: CXTransaction, action: String) {
 		callController.request(transaction) { error in
+			NSLog("CI_PROBE transaction %@ error=%@", action, String(describing: error))
 			if let error = error {
 				Log.error("CallKit: Requested transaction \(action) failed because: \(error)")
 			} else {

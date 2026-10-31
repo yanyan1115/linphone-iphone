@@ -324,6 +324,7 @@ extension ProviderDelegate: CXProviderDelegate {
 		let update = CXCallUpdate()
 		update.remoteHandle = action.handle
 		update.localizedCallerName = callInfo?.displayName
+		NSLog("CI_PROBE provider localizedCallerName=%@ handle=%@", callInfo?.displayName ?? "nil", action.handle.value)
 		self.provider.reportCall(with: action.callUUID, updated: update)
 		
 		let addr = callInfo?.toAddr
