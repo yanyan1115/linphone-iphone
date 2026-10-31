@@ -26,6 +26,10 @@ jobs:
           APP=$(ls -d build/Build/Products/Debug-iphonesimulator/*.app | head -1)
           BID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")
           UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in sorted(d.items(),reverse=True) if 'iOS' in k for x in v if 'iPhone' in x['name']))")
+          GROUP=$(/usr/libexec/PlistBuddy -c 'Print APP_GROUP_NAME' "$APP/Info.plist")
+          /usr/libexec/PlistBuddy -c 'Add :com.apple.security.application-groups array' -c "Add :com.apple.security.application-groups:0 string $GROUP" ent.plist
+          codesign --force --sign - --timestamp=none --entitlements ent.plist "$APP"
+          codesign -d --entitlements - "$APP" 2>&1 | tail -5
           xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" "$APP"
           xcrun simctl spawn "$UDID" log stream --level debug --predicate 'eventMessage CONTAINS "CI_PROBE"' > probe.log 2>&1 &
