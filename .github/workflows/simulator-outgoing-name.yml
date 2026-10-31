@@ -28,10 +28,15 @@ jobs:
           UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in sorted(d.items(),reverse=True) if 'iOS' in k for x in v if 'iPhone' in x['name']))")
           xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" "$APP"
-          SIMCTL_CHILD_CI_PROBE=1 xcrun simctl launch --console-pty --terminate-running-process "$UDID" "$BID" > app.log 2>&1 &
-          for t in 15 30 45 60; do sleep 15; xcrun simctl io "$UDID" screenshot "shot-$t.png" || true; done
-          grep -a 'CI_PROBE' app.log || echo 'no CI_PROBE lines'
-          tail -n 30 app.log
+          xcrun simctl spawn "$UDID" log stream --level debug --predicate 'eventMessage CONTAINS "CI_PROBE"' > probe.log 2>&1 &
+          sleep 5
+          SIMCTL_CHILD_CI_PROBE=1 xcrun simctl launch --terminate-running-process --stdout="$PWD/app.log" --stderr="$PWD/app.log" "$UDID" "$BID" > launch.log 2>&1
+          echo "launch exit $?" >> launch.log
+          cat launch.log
+          for t in 15 30 45 60 75 90; do sleep 15; xcrun simctl io "$UDID" screenshot "shot-$t.png" || true; xcrun simctl spawn "$UDID" launchctl list | grep -i linphone | head -3 || true; done
+          mkdir -p crashes; cp ~/Library/Logs/DiagnosticReports/*inphone* crashes/ 2>/dev/null || true
+          ls -la crashes
+          grep -a 'CI_PROBE' probe.log app.log || echo 'no CI_PROBE lines'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -39,4 +44,7 @@ jobs:
           path: |
             xcodebuild.log
             app.log
+            probe.log
+            launch.log
+            crashes/
             shot-*.png
