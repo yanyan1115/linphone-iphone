@@ -1,0 +1,48 @@
+name: english-fallback
+on:
+  push:
+    branches: ['ci/english-fallback']
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build for simulator
+        run: |
+          set -o pipefail
+          xcodebuild build -project LinphoneApp.xcodeproj -scheme Linphone \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee xcodebuild.log | grep -E 'error:|warning: could not merge|BUILD (SUCCEEDED|FAILED)' || true
+          test -d build/Build/Products/Debug-iphonesimulator/*.app
+      - name: Count keys and open in Chinese
+        run: |
+          APP=$(ls -d build/Build/Products/Debug-iphonesimulator/*.app | head -1)
+          for f in "$APP"/*.lproj/Localizable.strings; do
+            echo "$(basename "$(dirname "$f")") $(file -b "$f" | cut -c1-20) $(plutil -convert json -o - "$f" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+          done | tee counts.log
+          EXT=$(ls -d "$APP"/PlugIns/msgNotificationService.appex 2>/dev/null)
+          for f in "$EXT"/*.lproj/Localizable.strings; do
+            echo "ext $(basename "$(dirname "$f")") $(plutil -convert json -o - "$f" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+          done | tee -a counts.log
+          BID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in sorted(d.items(),reverse=True) if 'iOS' in k for x in v if 'iPhone' in x['name']))")
+          GROUP=$(/usr/libexec/PlistBuddy -c 'Print APP_GROUP_NAME' "$APP/Info.plist")
+          /usr/libexec/PlistBuddy -c 'Add :com.apple.security.application-groups array' -c "Add :com.apple.security.application-groups:0 string $GROUP" ent.plist
+          codesign --force --sign - --timestamp=none --entitlements ent.plist "$APP"
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" "$BID" -AppleLanguages '(zh-Hans)' -AppleLocale zh_CN
+          for t in 30 60 90; do sleep 30; xcrun simctl io "$UDID" screenshot "shot-$t.png" || true; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe
+          path: |
+            xcodebuild.log
+            counts.log
+            shot-*.png
